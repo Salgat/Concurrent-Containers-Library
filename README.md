@@ -96,9 +96,9 @@ int main() {
 }
 ```
 
-Concurrent vector uses locks for writes but is lock-free and wait-free for reads, which helps if your program only seldom writes to the vector.
+Concurrent vector uses locks for writes but is lock-free and wait-free for reads, which helps if your program only seldom writes to the vector. This container is especially unique in that, unlike most concurrent vector implementations, this supports thread-safe insertions and erases.
 
 Progress
 -----------------
 
-There is still a lot of work to do and not every method works properly (I believe vector currently has an issue with inserting values). Additionally, the classes are not properly setup (missing things like rule of 5 and std::move where applicable). Finally, there is a lot of commenting, more than is normal for a project, because of how difficult concurrent programming can be. Feedback is appreciated.
+There is still a lot of work to do and not every method works properly (I believe vector currently has an issue with inserting values). Additionally, the classes are not properly setup (missing things like rule of 5 and std::move where applicable) and are not exception-safe. Finally, there is a lot of commenting, more than is normal for a project, because of how difficult concurrent programming can be. Feedback is appreciated.
