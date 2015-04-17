@@ -61,46 +61,36 @@ int main() {
 }
 ```
 
-Concurrent Vector
+Concurrent "Data Pool"
 -----------------
 
-Concurrent Vector is an array based container that supports the following methods,
-* bool try_at(std::size_t index, T& value)
-* void push_back(T value)
-* bool try_insert(std::size_t position, T value)
-* std::size_t size()
-* void clear()
-* bool try_erase(std::size_t position)
-* bool test_and_erase(std::size_t position, T value)
-* iterator begin()
-* iterator end()
+Concurrent Data Pool is an alternative to concurrent queue and stack in that does not guarantee the order in which data is popped. The following methods are supported,
+* void push(T value)
+* bool try_pop(T& value)
+* bool clear();
+
+Below is an example of using ccl::data_pool to push and pop a string.
 
 ```c++
 #include "ccl.hpp"
 #include <iostream>
 
 int main() {
-    std::cout << "Starting concurrent vector test" << std::endl;
-    ccl::vector<std::string> vector;
-
-    for (std::size_t index = 0; index < 10; ++index) {
-        vector.push_back("value_" + std::to_string(index));
-    }
-
-    unsigned int index = 0;
-    for (auto entry : vector) {
-        if (entry) {
-            std::cout << "For index: " << index << " result is: " << *entry << std::endl;
-        } else {
-            std::cout << "For index: " << index << " result does not exist." << std::endl;
-        };
-
-        ++index;
+    std::cout << "Starting concurrent data pool test" << std::endl;
+    ccl::data_pool<std::string> pool;
+	
+    pool.push("Hello!");
+	
+    std::string popped_value = "Empty";
+    if(pool.try_pop(popped_value)) {
+        std::cout << "Popped value: " << popped_value << std::endl;
+    } else {
+        std::cout << "Value did not pop, variable is still: " << popped_value << std::endl;
     }
 }
 ```
 
-Concurrent vector uses locks for writes but is lock-free and wait-free for reads, which helps if your program only seldom writes to the vector. This container is especially unique in that, unlike most concurrent vector implementations, this supports thread-safe insertions and erases; this comes at the cost of using a double-buffer (which doubles the size of the container). This vector also supports iterators, but instead of returning values, returns shared pointers (std::shared_ptr) of the dereferenced iterator, since there is no way to guarantee that the value still exists for that iterator (which results in a nullptr).
+Concurrent Data Pool is an attempt to build a data structure that is more concurrent friendly than the stack and queue. The data pool uses a successive list of arrays with simple atomic_flags to show whether it can be written to or read from. The idea is that by giving up control over the order of the data, we can make it more concurrent friendly. Since the data is stored in vectors that are frequently re-used, the data being held has both temporal and spatial locality. When the data pool runs out of space, it simply creates a new larger vector and appends it to the list of pools. Benchmarks are still needed for this data structure.
 
 Progress
 -----------------
