@@ -14,7 +14,7 @@ namespace ccl {
 
     /**
      * Allows data to be pushed into a "pool" of data, where pops remove one entry with no guarantee about which is
-     * removed (random order for popping).
+     * removed (no order for popping).
      */
     template<typename T>
     class data_pool {
@@ -48,9 +48,11 @@ namespace ccl {
         };
 
         std::atomic<pool*> pool_head;
+        std::atomic_flag thread_helper;
 
     public:
-        data_pool() {
+        data_pool()
+            : thread_helper(ATOMIC_FLAG_INIT) {
             // Initialize first data pool
             pool_head = new pool(INITIAL_SIZE);
         }
@@ -70,9 +72,8 @@ namespace ccl {
         void push(T value) {
             while (true) {
                 auto current_pool = pool_head.load();
-                unsigned int count = 0;
                 while (current_pool) {
-                    for (auto &node_entry : current_pool->node_array) {
+                    for (auto& node_entry : current_pool->node_array) {
                         if (!node_entry.available_write.test_and_set()) {
                             // Node is available to use
                             node_entry.data = std::move(value);
@@ -85,12 +86,13 @@ namespace ccl {
                     }
 
                     current_pool = current_pool->next;
-                    ++count;
                 }
 
                 // If we reach this point, we need to expand the pool to try again
                 auto old_head = pool_head.load();
-                auto new_pool = new pool(old_head->size * GROWTH_RATE);
+                auto new_pool = new pool(old_head->size * GROWTH_RATE); // The cost of allocation on the heap is
+                                                                        // expensive, so even if old_head is outdated,
+                                                                        // the size calculated is fine to use.
                 do {
                     new_pool->next = old_head;
                 } while (!pool_head.compare_exchange_weak(old_head, new_pool));
@@ -103,11 +105,13 @@ namespace ccl {
         bool try_pop(T& return_value) {
             auto current_pool = pool_head.load();
             while (current_pool) {
-                // Iterate through each node looking for a node
-                for (auto &node_entry : current_pool->node_array) {
+                // Iterate through each node looking for a readable node
+                for (auto& node_entry : current_pool->node_array) {
                     if (!node_entry.available_read.test_and_set()) {
                         // Gained the lock on this entry, copy the value and make it available to be overwritten
                         return_value = node_entry.data;
+                        // We overwrite the data since we don't want it to hang around past its lifetime.
+                        node_entry.data = T();
                         node_entry.available_write.clear();
                         return true;
                     }
@@ -139,6 +143,22 @@ namespace ccl {
                 old_head = old_head->next;
                 //delete old_entry;
             }
+        }
+
+        /**
+         * Enables a thread helper who runs on a separate thread and occasionally reorganizes nodes in the pools so that
+         * the ones at the end of the pool list are moved to earlier pools. This is so that operations on the data
+         * structure don't have to iterate through many empty nodes to find a value to pop and keeps the data in the
+         * most active and largest pools for temporal/spatial locality.
+         *
+         * NOTE: This is a test feature and is returns false if the feature is not available.
+         */
+        bool enable_helper() {
+            if (!thread_helper.test_and_set()) {
+
+            }
+
+            return false;
         }
     };
 }

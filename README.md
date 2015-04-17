@@ -64,10 +64,10 @@ int main() {
 Concurrent "Data Pool"
 -----------------
 
-Concurrent Data Pool is an alternative to concurrent queue and stack in that does not guarantee the order in which data is popped. The following methods are supported,
+Concurrent Data Pool is a lock-free alternative to concurrent queue and stack in that it does not guarantee the order in which data is popped. The following methods are supported,
 * void push(T value)
 * bool try_pop(T& value)
-* bool clear();
+* void clear()
 
 Below is an example of using ccl::data_pool to push and pop a string.
 
@@ -90,9 +90,9 @@ int main() {
 }
 ```
 
-Concurrent Data Pool is an attempt to build a data structure that is more concurrent friendly than the stack and queue. The data pool uses a successive list of arrays with simple atomic_flags to show whether it can be written to or read from. The idea is that by giving up control over the order of the data, we can make it more concurrent friendly. Since the data is stored in vectors that are frequently re-used, the data being held has both temporal and spatial locality. When the data pool runs out of space, it simply creates a new larger vector and appends it to the list of pools. Benchmarks are still needed for this data structure.
+Concurrent Data Pool is an attempt to build a data structure that is more concurrent friendly than the stack and queue. The data pool uses a successive list of arrays with simple atomic_flags to show whether it can be written to or read from. The idea is that by giving up control over the order of the data, we can make it more concurrent friendly. Since the data is stored in vectors that are frequently re-used, the data being held has both temporal and spatial locality. When the data pool runs out of space, it simply creates a new larger vector and appends it to the list of pools. The wait time is bounded by the number of nodes allocated (except for a CAS loop used to append a new array to the pool list for pushing). Benchmarks are still needed for this data structure.
 
 Progress
 -----------------
 
-There is still a lot of work to do and not every method works properly (I believe vector currently has an issue with inserting values). Additionally, the classes are not properly setup (missing things like rule of 5 and std::move where applicable) and are not exception-safe. Finally, there is a lot of commenting, more than is normal for a project, because of how difficult concurrent programming can be. Feedback is appreciated, especially since, as stated previously, this is a naive implementation of thread-safe containers.
+There is still a lot of work to do, for example, the classes are not properly setup (missing things like rule of 5 and std::move where applicable) and are not exception-safe. Finally, there is a lot of commenting, more than is normal for a project, because of how difficult concurrent programming can be. Feedback is appreciated, especially since, as stated previously, this is a naive implementation of thread-safe containers.
