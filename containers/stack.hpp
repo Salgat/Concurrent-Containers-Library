@@ -60,6 +60,7 @@ namespace ccl {
             auto current_record = publication_head.load();
             publication_record* previous_record = nullptr;
             while (current_record) {
+                std::atomic_thread_fence(std::memory_order_acquire);
                 if (current_record->request.first != RequestType::NULL_RESPONSE) {
                     // Update the age of all non-null requests and apply the methods they requested
                     current_record->age = combining_pass_counter;
@@ -79,8 +80,8 @@ namespace ccl {
 
                             auto old_head = head;
                             head = head->next;
-                            //std::atomic_thread_fence(std::memory_order_release);
-                            //delete old_head;
+                            std::atomic_thread_fence(std::memory_order_release);
+                            delete old_head;
                         } else {
                             current_record->request.first = RequestType::RESPONSE_POP_FAIL;
                         }
@@ -124,7 +125,12 @@ namespace ccl {
             }
 
             // Update node with new values
-            thread_publication_record->request = std::move(request);
+            // May want to be careful about this, since a combiner could read request.first before request.second is
+            // also updated on its cache?
+            //thread_publication_record->request = std::move(request);
+            thread_publication_record->request.second = std::move(request.second);
+            std::atomic_thread_fence(std::memory_order_release);
+            thread_publication_record->request.first = std::move(request.first);
 
             // Make sure record is set to active
             if(!thread_publication_record->active) {
@@ -176,6 +182,7 @@ namespace ccl {
                 if (record->request.first == RequestType::RESPONSE_POP) {
                     // Request processed; acknowledge and return
                     record->request.first = RequestType::NULL_RESPONSE;
+                    std::atomic_thread_fence(std::memory_order_acquire);
                     return_value = std::move(record->request.second);
                     return true;
                 } else if (record->request.first == RequestType::RESPONSE_POP_FAIL) {
