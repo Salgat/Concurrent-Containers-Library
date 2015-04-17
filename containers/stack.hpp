@@ -1,18 +1,6 @@
-//=====================================================================================================================================
-//The MIT License (MIT)
-//Copyright (c) 2015 Austin Salgat
 //
-//Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files 
-//(the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, 
-//merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished 
-//to do so, subject to the following conditions:
-//The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+// Created by Austin Salgat on 4/1/2015.
 //
-//THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
-//OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE 
-//LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR 
-//IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//=====================================================================================================================================
 
 #ifndef CCL_STACK_HPP
 #define CCL_STACK_HPP
@@ -20,56 +8,13 @@
 #include <utility>
 #include <memory>
 #include <atomic>
+#include <iostream>
+#include <thread>
 
 namespace ccl {
     /**
-     * Sequential (thread unsafe) version of the stack, used as a reference.
-     */
-    template<typename T>
-    class sequential_stack {
-    private:
-        struct node {
-            std::shared_ptr<node> next;
-            T data;
-
-            node(T data_)
-                    : data(std::move(data_)) { }
-        };
-
-        std::shared_ptr<node> head;
-
-    public:
-        sequential_stack() {}
-
-        // Disallow copying stacks
-        sequential_stack(const sequential_stack &other) = delete;
-        sequential_stack &operator=(const sequential_stack &other) = delete;
-
-        bool try_pop(T& return_value) {
-            if (!head) {
-                return false;
-            } else {
-                return_value = std::move(head->data);
-                head = head->next;
-                return true;
-            }
-        }
-
-        void push(T new_value) {
-            // Create a new node and make it the new head
-            auto new_node = std::make_shared<node>(std::move(new_value));
-            new_node->next = head;
-            head = new_node;
-        }
-
-        bool empty() {
-            return !head;
-        }
-    };
-
-    /**
-     * Concurrent stack. A simplified version of std::stack that allows for concurrent access. As long as std::atomic is
-     * implemented as lock-free, this class is lock-free (but not wait-free).
+     * Concurrent stack. A simplified version of std::stack that allows for concurrent access. Implemented using
+     * flat combining, outlined here: http://www.cs.bgu.ac.il/~hendlerd/papers/flat-combining.pdf
      */
     template<typename T>
     class stack {
@@ -79,22 +24,137 @@ namespace ccl {
             T data;
 
             node(T data_)
-                    : data(std::move(data_))
+                    : data(data_)
                     , next(nullptr) { }
         };
 
-        std::atomic<node*> head;
+        enum class RequestType {
+            PUSH,
+            POP,
+            RESPONSE_PUSH,
+            RESPONSE_POP,
+            RESPONSE_POP_FAIL,
+            NULL_RESPONSE
+        };
+
+        struct publication_record {
+            publication_record* next;
+            std::pair<RequestType, T> request;
+            unsigned int age;
+            std::atomic<bool> active;
+        };
+
+        node* head;
+
+        std::atomic<publication_record*> publication_head;
+        unsigned int combining_pass_counter;
+        std::atomic_flag combiner_lock;
+
+        /**
+         * Handles pending thread requests.
+         */
+        void combiner() {
+            ++combining_pass_counter;
+
+            // Traverse publication list from the head, updating age of non-null records and and processing requests
+            auto current_record = publication_head.load();
+            publication_record* previous_record = nullptr;
+            while (current_record) {
+                if (current_record->request.first != RequestType::NULL_RESPONSE) {
+                    // Update the age of all non-null requests and apply the methods they requested
+                    current_record->age = combining_pass_counter;
+
+                    if (current_record->request.first == RequestType::PUSH) {
+                        auto new_head = new node(current_record->request.second);
+                        new_head->next = head;
+                        head = new_head;
+
+                        current_record->request.first = RequestType::RESPONSE_PUSH;
+                    } else if (current_record->request.first == RequestType::POP) {
+                        if (head) {
+                            current_record->request.second = head->data;
+                            std::atomic_thread_fence(std::memory_order_release); // Make sure data is updated before
+                                                                                 // signalling a response.
+                            current_record->request.first = RequestType::RESPONSE_POP;
+
+                            auto old_head = head;
+                            head = head->next;
+                            //std::atomic_thread_fence(std::memory_order_release);
+                            //delete old_head;
+                        } else {
+                            current_record->request.first = RequestType::RESPONSE_POP_FAIL;
+                        }
+                    }
+                } else {
+                    // Null requests are removed from the publication list if they become too old
+                    if (combining_pass_counter - current_record->age > MAXIMUM_RECORD_AGE) {
+                        if (!previous_record) {
+                            publication_head.store(current_record->next);
+                        } else {
+                            previous_record->next = current_record->next;
+                        }
+
+                        current_record->active.store(false);
+                    }
+                }
+
+                if (current_record->active) {
+                    // Record the previous record in case we need to remove a record
+                    previous_record = current_record;
+                }
+                current_record = current_record->next;
+            }
+
+            combiner_lock.clear();
+        };
+
+        /**
+         * Adds request to thread's
+         */
+        publication_record* add_request(std::pair<RequestType, T> request) {
+            static thread_local publication_record* thread_publication_record = nullptr;
+
+            // First check if thread has a publication record
+            if (thread_publication_record == nullptr) {
+                // Allocate a publication record for thread
+                thread_publication_record = new publication_record;
+                thread_publication_record->next = nullptr;
+                thread_publication_record->age = combining_pass_counter;
+                thread_publication_record->active = false;
+            }
+
+            // Update node with new values
+            thread_publication_record->request = std::move(request);
+
+            // Make sure record is set to active
+            if(!thread_publication_record->active) {
+                thread_publication_record->active = true;
+
+                // Append as the new head
+                auto old_head = publication_head.load();
+                do {
+                    thread_publication_record->next = old_head;
+                } while(!publication_head.compare_exchange_weak(old_head, thread_publication_record));
+            }
+
+            return thread_publication_record;
+        }
 
     public:
         stack()
-            : head(nullptr){}
+            : head(nullptr)
+            , combiner_lock(ATOMIC_FLAG_INIT)
+            , combining_pass_counter(0) {
+            // Setup first thread's publication record
+            publication_head.store(nullptr);
+        }
 
         ~stack() {
             // Pop stack nodes until head becomes nullptr (reached the tail).
             // Note: Both constructor and destructor can be assumed sequential, so thread-safety is not an issue.
-            while (head.load() != nullptr) {
-                auto old_head = head.load();
-                head.store(head.load()->next);
+            while (head != nullptr) {
+                auto old_head = head;
+                head = head->next;
                 delete old_head;
             }
         }
@@ -108,33 +168,57 @@ namespace ccl {
          *  is not empty).
          */
         bool try_pop(T& return_value) {
-            // Store the current head, and have head point to the next entry in the stack (in an atomic fashion).
-            // Make sure, if stack is emptied at any time during this loop, that we end the loop before accessing
-            // old_head->next on a nullptr.
-            auto old_head = head.load();
-            while (old_head != nullptr and !head.compare_exchange_weak(old_head, old_head->next));
+            std::pair<RequestType, T> request = std::make_pair(RequestType::POP, T());
+            auto record = add_request(request);
 
-            // Now old_head holds the old head that is popped (nullptr if old_head->next didn't exist and stack was empty).
-            if (old_head != nullptr) {
-                return_value = std::move(old_head->data);
-                delete old_head;
-                return true;
+            // Node is prepared, spin waiting on a response or if the lock is open
+            while (true) {
+                if (record->request.first == RequestType::RESPONSE_POP) {
+                    // Request processed; acknowledge and return
+                    record->request.first = RequestType::NULL_RESPONSE;
+                    return_value = std::move(record->request.second);
+                    return true;
+                } else if (record->request.first == RequestType::RESPONSE_POP_FAIL) {
+                    record->request.first = RequestType::NULL_RESPONSE;
+                    return false;
+                } else if (!record->active) {
+                    // Combiner decided that record is too old, update it and add request again to publication list
+                    record = add_request(request);
+                } else if (!combiner_lock.test_and_set()) {
+                    // Got the lock
+                    combiner();
+                } else {
+                    std::this_thread::yield();
+                }
             }
-            return false;
         }
 
         /**
          * Pushes a new value onto the stack.
          */
         void push(T new_value) {
-            // Create a new node and make it the new head
-            auto new_node = new node(std::move(new_value));
+            std::pair<RequestType, T> request = std::make_pair(RequestType::PUSH, std::move(new_value));
+            auto record = add_request(request);
 
-            // new_node now becomes the next head. Need to make sure new_node->next points to the current head
-            // before making it the new head, otherwise the sequence of nodes is out-of-order (another node
-            // might have already changed the head, which would be overwritten again deleting that node).
-            new_node->next = head.load();
-            while(!head.compare_exchange_weak(new_node->next, new_node));
+            // Node is prepared, spin waiting on a response or if the lock is open
+            while (true) {
+                if (record->request.first == RequestType::RESPONSE_PUSH) {
+                    // Request processed; acknowledge and return
+                    record->request.first = RequestType::NULL_RESPONSE;
+                    return;
+                } else if (!record->active) {
+                    // Combiner decided that record is too old, update it and add request again to publication list
+                    record = add_request(std::move(request));
+                } else if (!combiner_lock.test_and_set()) {
+                    // Got the lock
+                    combiner();
+                } else {
+                    // For programs where the thread count accessing this data structure is higher than the core count
+                    // available, this prevents wasteful empty CAS loops waiting for a lock that is fighting to be
+                    // scheduled by the OS.
+                    std::this_thread::yield();
+                }
+            }
         }
 
         /**
@@ -142,7 +226,7 @@ namespace ccl {
          * entry to the stack by the time the returned boolean is used.
          */
         bool empty() {
-            return !head.load();
+            return !head;
         }
     };
 }

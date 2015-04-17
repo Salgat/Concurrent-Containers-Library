@@ -23,6 +23,10 @@
 #ifndef CCL_CCL_HPP
 #define CCL_CCL_HPP
 
+namespace ccl {
+    unsigned int const MAXIMUM_RECORD_AGE = 100; // After 100 operations, old records are removed from publication list
+}
+
 // Concurrent stack (LIFO)
 #include "containers/stack.hpp"
 // Doubly-linked list (for fast insertion/erase but slow iteration)
