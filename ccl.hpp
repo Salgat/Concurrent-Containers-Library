@@ -19,10 +19,10 @@ namespace ccl {
 //#include "containers/list.hpp"
 // Concurrent Queue (FIFO)
 #include "containers/queue.hpp"
-// Array implemented vector (for fast read but slow write)
-//#include "containers/vector.hpp"
 // Operates like a stack/queue in that data can be pushed into it, but pop randomly removes one pushed entry (there
 // are no guarantees about order).
 #include "containers/data_pool.hpp"
+// Concurrent Hash Map
+#include "containers/map.hpp"
 
 #endif //CCL_CCL_HPP

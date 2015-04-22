@@ -151,7 +151,7 @@ namespace ccl {
          * structure don't have to iterate through many empty nodes to find a value to pop and keeps the data in the
          * most active and largest pools for temporal/spatial locality.
          *
-         * NOTE: This is a test feature and is returns false if the feature is not available.
+         * NOTE: This is a test feature and returns false if the feature is not available.
          */
         bool enable_helper() {
             if (!thread_helper.test_and_set()) {
