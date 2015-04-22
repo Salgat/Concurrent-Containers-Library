@@ -92,6 +92,34 @@ int main() {
 
 Concurrent Data Pool is an attempt to build a data structure that is more concurrent friendly than the stack and queue. The data pool uses a successive list of arrays with simple atomic_flags to show whether it can be written to or read from. The idea is that by giving up control over the order of the data, we can make it more concurrent friendly. Since the data is stored in vectors that are frequently re-used, the data being held has both temporal and spatial locality. When the data pool runs out of space, it simply creates a new larger vector and appends it to the list of pools. The wait time is bounded by the number of nodes allocated (except for a CAS loop used to append a new array to the pool list for pushing). Benchmarks are still needed for this data structure.
 
+Concurrent Map
+-----------------
+
+Concurrent Map is a concurrent container that stores values using an associated key, similar to std::map. It uses a simple hash (buckets) to partition keys before storing them in an AVL tree to handle collisions. Thread-safety is done through locking individual buckets as they are being used. The following methods are supported,
+* void insert(KEY_TYPE key, T value)
+* bool try_at(KEY_TYPE key, T& return_value)
+* bool try_erase(KEY_TYPE key)
+
+Below is an example of using ccl::map to add, read, and erase a value using a key.
+
+```c++
+#include "ccl.hpp"
+#include <iostream>
+#include <string>
+
+int main() {
+    ccl::map<int, std::string> map;
+    map.insert(8, "testing");
+
+    std::string value = "empty";
+    if(map.try_at(8, value)) {
+        std::cout << "Value read: " << value << std::endl;
+    }
+
+    map.try_erase(8);
+}
+```
+
 Progress
 -----------------
 

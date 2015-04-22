@@ -185,7 +185,7 @@ namespace ccl {
          * Recursively find all children and delete them.
          */
         node* delete_children(node* base_node) {
-            if (!base_node) {
+            if (base_node) {
                 delete delete_children(base_node->lesser_key_node);
                 delete delete_children(base_node->greater_key_node);
             }
