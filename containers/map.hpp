@@ -67,7 +67,7 @@ namespace ccl {
         /**
          * Corrects the height value for the given node (assuming height is correct for children nodes).
          */
-        inline void fix_height(node* node_) {
+        void fix_height(node* node_) {
             auto lesser_node_height = height(node_->lesser_key_node);
             auto greater_node_height = height(node_->greater_key_node);
             node_->height = (lesser_node_height > greater_node_height ? lesser_node_height : greater_node_height) + 1;
@@ -100,7 +100,7 @@ namespace ccl {
         /**
          * Balances provided node.
          */
-        inline node* balance(node* node_) {
+        node* balance(node* node_) {
             fix_height(node_);
             if (balance_factor(node_) == 2) {
                 // Too high on right side
@@ -127,7 +127,6 @@ namespace ccl {
                 return new node(std::move(value), std::move(hash_value));
             if (hash_value < base_node->hash_value)
                 base_node->lesser_key_node = insert(base_node->lesser_key_node, std::move(value), std::move(hash_value));
-            // Todo: This should test for "if >" then also add another "if ==" for equal hashes
             else if (hash_value > base_node->hash_value)
                 base_node->greater_key_node = insert(base_node->greater_key_node, std::move(value), std::move(hash_value));
             else if (hash_value == base_node->hash_value)
@@ -218,11 +217,7 @@ namespace ccl {
 
             // Navigate through bucket to find an open node
             auto current_node = buckets[bucket_to_add];
-            if (current_node == nullptr) {
-                buckets[bucket_to_add] = new node(std::move(value), std::move(hash));
-            } else{
-                buckets[bucket_to_add] = insert(current_node, std::move(value), std::move(hash));
-            }
+            buckets[bucket_to_add] = insert(current_node, std::move(value), std::move(hash));
         }
 
         /**
@@ -235,7 +230,6 @@ namespace ccl {
 
             // Navigate through bucket to find an open node
             auto current_node = buckets[bucket_to_add];
-            if (current_node == nullptr) return false;
             while (current_node) {
                 if (hash > current_node->hash_value) {
                     current_node = current_node->greater_key_node;
