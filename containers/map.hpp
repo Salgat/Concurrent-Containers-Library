@@ -255,10 +255,7 @@ namespace ccl {
             bool result = false;
             buckets[bucket_to_add] = remove(buckets[bucket_to_add], std::move(hash), result);
 
-            if (result)
-                return true;
-
-            return false;
+            return result;
         }
     };
 }
